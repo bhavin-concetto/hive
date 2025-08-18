@@ -1,8 +1,4 @@
 import 'dart:async';
-import 'dart:html';
-import 'dart:indexed_db';
-import 'dart:js' as js;
-import 'dart:js_util';
 import 'dart:typed_data';
 
 import 'package:hive/hive.dart';
@@ -12,9 +8,9 @@ import 'package:hive/src/binary/binary_writer_impl.dart';
 import 'package:hive/src/binary/frame.dart';
 import 'package:hive/src/box/keystore.dart';
 import 'package:hive/src/registry/type_registry_impl.dart';
-import 'package:meta/meta.dart';
+import 'package:idb_shim/idb.dart';
 
-/// Handles all IndexedDB related tasks
+/// Handles all IndexedDB related tasks using idb_shim
 class StorageBackendJs extends StorageBackend {
   static const _bytePrefix = [0x90, 0xA9];
   final Database _db;
@@ -23,7 +19,6 @@ class StorageBackendJs extends StorageBackend {
 
   TypeRegistry _registry;
 
-  /// Not part of public API
   StorageBackendJs(this._db, this._cipher, this.objectStoreName,
       [this._registry = TypeRegistryImpl.nullImpl]);
 
@@ -39,109 +34,53 @@ class StorageBackendJs extends StorageBackend {
         bytes[1] == _bytePrefix[1];
   }
 
-  /// Not part of public API
-  @visibleForTesting
   Future<dynamic> encodeValue(Frame frame) async {
     var value = frame.value;
     if (_cipher == null) {
-      if (value == null) {
-        return value;
-      } else if (value is Uint8List) {
-        if (!_isEncoded(value)) {
-          return value.buffer;
-        }
-      } else if (value is num ||
-          value is bool ||
-          value is String ||
-          value is List<num> ||
-          value is List<bool> ||
-          value is List<String>) {
-        return value;
-      }
+      if (value == null) return value;
+      if (value is Uint8List && !_isEncoded(value)) return value.buffer;
+      if (value is num || value is bool || value is String) return value;
     }
 
     var frameWriter = BinaryWriterImpl(_registry);
     frameWriter.writeByteList(_bytePrefix, writeLength: false);
 
-    if (_cipher == null) {
-      frameWriter.write(value);
-    } else {
-      await frameWriter.writeEncrypted(value, _cipher!);
-    }
+    _cipher == null
+        ? frameWriter.write(value)
+        : await frameWriter.writeEncrypted(value, _cipher!);
 
     var bytes = frameWriter.toBytes();
-    var sublist = bytes.sublist(0, bytes.length);
-    return sublist.buffer;
+    return bytes.buffer;
   }
 
-  /// Not part of public API
-  @visibleForTesting
   Future<dynamic> decodeValue(dynamic value) async {
     if (value is ByteBuffer) {
       var bytes = Uint8List.view(value);
       if (_isEncoded(bytes)) {
         var reader = BinaryReaderImpl(bytes, _registry);
         reader.skip(2);
-        if (_cipher == null) {
-          return reader.read();
-        } else {
-          return reader.readEncrypted(_cipher!);
-        }
-      } else {
-        return bytes;
+        return _cipher == null ? reader.read() : reader.readEncrypted(_cipher!);
       }
-    } else {
-      return value;
+      return bytes;
     }
+    return value;
   }
 
-  /// Not part of public API
-  @visibleForTesting
   ObjectStore getStore(bool write) {
     return _db
         .transaction(objectStoreName, write ? 'readwrite' : 'readonly')
         .objectStore(objectStoreName);
   }
 
-  /// Not part of public API
-  @visibleForTesting
-  Future<List<dynamic>> getKeys({bool cursor = false}) {
+  Future<List<dynamic>> getKeys() async {
     var store = getStore(false);
-
-    if (hasProperty(store, 'getAllKeys') && !cursor) {
-      var completer = Completer<List<dynamic>>();
-      var request = getStore(false).getAllKeys(null);
-      request.onSuccess.listen((_) {
-        completer.complete(request.result as List<dynamic>?);
-      });
-      request.onError.listen((_) {
-        completer.completeError(request.error!);
-      });
-      return completer.future;
-    } else {
-      return store.openCursor(autoAdvance: true).map((e) => e.key).toList();
-    }
+    return (await store.getAllKeys());
   }
 
-  /// Not part of public API
-  @visibleForTesting
-  Future<Iterable<dynamic>> getValues({bool cursor = false}) {
+  Future<Iterable<dynamic>> getValues() async {
     var store = getStore(false);
-
-    if (hasProperty(store, 'getAll') && !cursor) {
-      var completer = Completer<Iterable<dynamic>>();
-      var request = store.getAll(null);
-      request.onSuccess.listen((_) async {
-        var futures = (request.result as List).map(decodeValue);
-        completer.complete(await Future.wait(futures));
-      });
-      request.onError.listen((_) {
-        completer.completeError(request.error!);
-      });
-      return completer.future;
-    } else {
-      return store.openCursor(autoAdvance: true).map((e) => e.value).toList();
-    }
+    var result = await store.getAll();
+    return Future.wait(result.map(decodeValue));
   }
 
   @override
@@ -150,18 +89,15 @@ class StorageBackendJs extends StorageBackend {
     _registry = registry;
     var keys = await getKeys();
     if (!lazy) {
-      var i = 0;
       var values = await getValues();
-      for (var value in values) {
-        var key = keys[i++];
-        keystore.insert(Frame(key, value), notify: false);
+      for (var i = 0; i < values.length; i++) {
+        keystore.insert(Frame(keys[i], values.elementAt(i)), notify: false);
       }
     } else {
       for (var key in keys) {
         keystore.insert(Frame.lazy(key), notify: false);
       }
     }
-
     return 0;
   }
 
@@ -175,51 +111,26 @@ class StorageBackendJs extends StorageBackend {
   Future<void> writeFrames(List<Frame> frames) async {
     var store = getStore(true);
     for (var frame in frames) {
-      if (frame.deleted) {
-        await store.delete(frame.key);
-      } else {
-        await store.put(await encodeValue(frame), frame.key);
-      }
+      frame.deleted
+          ? await store.delete(frame.key)
+          : await store.put(await encodeValue(frame), frame.key);
     }
   }
 
   @override
-  Future<List<Frame>> compact(Iterable<Frame> frames) {
-    throw UnsupportedError('Not supported');
-  }
+  Future<List<Frame>> compact(Iterable<Frame> frames) =>
+      throw UnsupportedError('Not supported');
 
   @override
-  Future<void> clear() {
-    return getStore(true).clear();
-  }
+  Future<void> clear() => getStore(true).clear();
 
   @override
-  Future<void> close() {
-    _db.close();
-    return Future.value();
-  }
+  Future<void> close() async => _db.close();
 
   @override
   Future<void> deleteFromDisk() async {
-    final indexDB = js.context.hasProperty('window')
-        ? window.indexedDB
-        : WorkerGlobalScope.instance.indexedDB;
-
-    // directly deleting the entire DB if a non-collection Box
-    if (_db.objectStoreNames?.length == 1) {
-      await indexDB!.deleteDatabase(_db.name!);
-    } else {
-      final db =
-          await indexDB!.open(_db.name!, version: 1, onUpgradeNeeded: (e) {
-        var db = e.target.result as Database;
-        if ((db.objectStoreNames ?? []).contains(objectStoreName)) {
-          db.deleteObjectStore(objectStoreName);
-        }
-      });
-      if ((db.objectStoreNames ?? []).isEmpty) {
-        await indexDB.deleteDatabase(_db.name!);
-      }
-    }
+    final dbName = _db.name;
+    await _db.factory.deleteDatabase(dbName);
   }
 
   @override

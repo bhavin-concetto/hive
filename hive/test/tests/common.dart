@@ -115,6 +115,7 @@ Future<void> expectDirEqualsAssetDir(Directory dir1, String part1,
 void returnFutureVoid(When<Future<void>> v) =>
     v.thenAnswer((i) => Future.value(null));
 
+
 final bool soundNullSafety = (() {
   try {
     // ignore: cast_from_null_always_fails

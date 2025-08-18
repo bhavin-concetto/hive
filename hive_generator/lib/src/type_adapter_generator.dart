@@ -78,7 +78,7 @@ class TypeAdapterGenerator extends GeneratorForAnnotation<HiveType> {
   Set<String> getAllAccessorNames(InterfaceElement interface) {
     var accessorNames = <String>{};
 
-    var supertypes = interface.allSupertypes.map((it) => it.element2);
+    var supertypes = interface.allSupertypes.map((it) => it.element);
     for (var type in [interface, ...supertypes]) {
       for (var accessor in type.accessors) {
         if (accessor.isSetter) {
@@ -100,30 +100,36 @@ class TypeAdapterGenerator extends GeneratorForAnnotation<HiveType> {
     var getters = <AdapterField>[];
     var setters = <AdapterField>[];
     for (var name in accessorNames) {
-      var getter = interface.lookUpGetter(name, library);
+      var getter =
+          interface.augmented.lookUpGetter(name: name, library: library);
       if (getter != null) {
-        var getterAnn =
-            getHiveFieldAnn(getter.variable) ?? getHiveFieldAnn(getter);
+        var getterAnn = getHiveFieldAnn(
+              getter.variable2!.nonSynthetic,
+            ) ??
+            getHiveFieldAnn(getter);
         if (getterAnn != null) {
-          var field = getter.variable;
+          var field = getter.variable2;
           getters.add(AdapterField(
             getterAnn.index,
-            field.name,
+            field!.name,
             field.type,
             getterAnn.defaultValue,
           ));
         }
       }
 
-      var setter = interface.lookUpSetter('$name=', library);
+      var setter =
+          interface.augmented.lookUpSetter(name: '$name=', library: library);
       if (setter != null) {
-        var setterAnn =
-            getHiveFieldAnn(setter.variable) ?? getHiveFieldAnn(setter);
+        var setterAnn = getHiveFieldAnn(
+              setter.variable2!.nonSynthetic,
+            ) ??
+            getHiveFieldAnn(setter);
         if (setterAnn != null) {
-          var field = setter.variable;
+          var field = setter.variable2;
           setters.add(AdapterField(
             setterAnn.index,
-            field.name,
+            field!.name,
             field.type,
             setterAnn.defaultValue,
           ));
