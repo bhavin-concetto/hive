@@ -205,7 +205,7 @@ abstract class BoxBaseImpl<E> implements BoxBase<E> {
     await keystore.close();
     hive.unregisterBox(name);
 
-    await backend.close();
+    backend.close();
   }
 
   @override

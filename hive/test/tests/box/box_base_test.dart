@@ -14,18 +14,12 @@ import '../mocks.dart';
 
 class _BoxBaseMock<E> extends BoxBaseImpl<E> with Mock {
   _BoxBaseMock(
-    HiveImpl hive,
-    String name,
-    KeyComparator? keyComparator,
-    CompactionStrategy compactionStrategy,
-    StorageBackend backend,
-  ) : super(
-          hive,
-          name,
-          keyComparator,
-          compactionStrategy,
-          backend,
-        );
+    super.hive,
+    super.name,
+    super.keyComparator,
+    super.compactionStrategy,
+    super.backend,
+  );
 
   @override
   Future<void> flush() => Future.value();

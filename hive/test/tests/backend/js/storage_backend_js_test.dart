@@ -1,7 +1,7 @@
 @TestOn('browser')
 import 'dart:async' show Future;
-import 'dart:html';
-import 'dart:indexed_db';
+import 'dart:js_interop';
+
 import 'dart:typed_data';
 
 import 'package:hive/hive.dart';
@@ -14,8 +14,17 @@ import 'package:hive/src/registry/type_registry_impl.dart';
 import 'package:test/test.dart';
 
 import '../../frames.dart';
+import 'package:idb_shim/idb.dart';
 
 late final Database _nullDatabase;
+
+@JS('window.indexedDB')
+external IdbFactory? get windowIndexedDB;
+
+@JS('self.indexedDB')
+external IdbFactory? get workerIndexedDB;
+
+IdbFactory? get indexedDB => windowIndexedDB ?? workerIndexedDB;
 
 StorageBackendJs _getBackend({
   Database? db,
@@ -26,9 +35,9 @@ StorageBackendJs _getBackend({
 }
 
 Future<Database> _openDb([String name = 'testBox']) async {
-  return await window.indexedDB!.open(name, version: 1, onUpgradeNeeded: (e) {
-    var db = e.target.result as Database;
-    if (!db.objectStoreNames!.contains('box')) {
+  return await indexedDB!.open(name, version: 1, onUpgradeNeeded: (e) {
+    var db = e.target as Database;
+    if (!db.objectStoreNames.contains('box')) {
       db.createObjectStore('box');
     }
   });
@@ -154,7 +163,7 @@ void main() async {
         var db = await _getDbWith({'key1': 1, 'key2': 2, 'key3': 3});
         var backend = _getBackend(db: db);
 
-        expect(await backend.getKeys(cursor: true), ['key1', 'key2', 'key3']);
+        expect(await backend.getKeys(), ['key1', 'key2', 'key3']);
       });
 
       test('without cursor', () async {
@@ -170,7 +179,7 @@ void main() async {
         var db = await _getDbWith({'key1': 1, 'key2': null, 'key3': 3});
         var backend = _getBackend(db: db);
 
-        expect(await backend.getValues(cursor: true), [1, null, 3]);
+        expect(await backend.getValues(), [1, null, 3]);
       });
 
       test('without cursor', () async {
@@ -254,7 +263,7 @@ void main() async {
     test('.close()', () async {
       var db = await _getDbWith({'key1': 1, 'key2': 2, 'key3': 3});
       var backend = _getBackend(db: db);
-      await backend.close();
+      backend.close();
 
       await expectLater(() async => await backend.getKeys(), throwsA(anything));
     });
